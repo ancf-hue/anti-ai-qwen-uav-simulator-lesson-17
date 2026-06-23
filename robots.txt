@@ -1,0 +1,35 @@
+# Robots.txt for Анти ИИ Qwen БПЛА Тренажёр - Урок 17: Геолог
+# https://anti-ai-qwen-uav-simulator-lesson-1-pi.vercel.app/
+
+# Разрешить всем поисковым роботам индексировать сайт
+User-agent: *
+Allow: /
+
+# Указать расположение карты сайта
+Sitemap: https://anti-ai-qwen-uav-simulator-lesson-1-pi.vercel.app/sitemap.xml
+
+# Директивы для Google
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+# Директивы для Yandex
+User-agent: Yandex
+Allow: /
+Crawl-delay: 1
+
+# Директивы для Bing
+User-agent: Bingbot
+Allow: /
+
+# Директивы для DuckDuckGo
+User-agent: DuckDuckBot
+Allow: /
+
+# Запретить доступ к служебным файлам (если появятся)
+User-agent: *
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /*.json$
+Disallow: /*.log$
