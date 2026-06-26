@@ -229,6 +229,7 @@ console.log('🗺️ Геолог-симулятор загружен');
 console.log('🎮 Управление: WASD + Q/E');
 console.log('⚠️ Правила: Столкновение = провал!');
 
+// ========== КОНФИГИ ==========
 const DIFFICULTY_CONFIG = {
   easy: { depositCount: 3, obstacleCount: 5, MISSION_TIME: 120, name: 'Лёгкий' },
   medium: { depositCount: 5, obstacleCount: 10, MISSION_TIME: 150, name: 'Средний' },
@@ -237,22 +238,34 @@ const DIFFICULTY_CONFIG = {
 
 const DEPOSIT_TYPES = ['💎 Алмазы', '🥇 Золото', '⛽ Нефть', '🔩 Железная руда', '💠 Уран', '🌋 Редкоземельные металлы'];
 
-let currentDifficulty = 'easy';
+// ========== ГЛОБАЛЬНОЕ СОСТОЯНИЕ (исправлено: объявлено ДО всех функций) ==========
 let state = {
-  animationId: null, gameCompleted: false, timeLeft: 120, timerInterval: null, isRestarting: false,
-  depositsFound: 0, batteryLevel: 100, score: 0,
+  animationId: null,
+  gameCompleted: false,
+  timeLeft: 120,
+  timerInterval: null,
+  isRestarting: false,
+  depositsFound: 0,
+  batteryLevel: 100,
+  score: 0,
   dronePos: new THREE.Vector3(0, 10, 0),
   droneVel: new THREE.Vector3(0, 0, 0),
-  propAngle: 0, signalLevel: 100,
-  currentDeposit: null, scanProgress: 0
+  propAngle: 0,
+  signalLevel: 100,
+  currentDeposit: null,
+  scanProgress: 0
 };
 
+// ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 let scene, camera, renderer, droneGroup;
 let deposits = [], obstacles = [];
 let propellers = [];
 let audioCtx = null, notifTimeout = null, lastNotifText = "";
 let keys = {};
+let currentDifficulty = 'easy';
+let listenersAttached = false;
 
+// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 function ensureAudio(){
   if(!audioCtx){ try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return false; } }
   if(audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
@@ -293,7 +306,14 @@ function showNotification(text, type = ''){
   notifTimeout = setTimeout(() => { n.className = ''; lastNotifText = ""; }, 2500);
 }
 
-async function startSimulator(difficulty){
+function startSimulator(difficulty){
+  // Проверка, что THREE загружен
+  if(typeof THREE === 'undefined'){
+    showNotification('❌ Ошибка: библиотека Three.js не загружена! Проверьте интернет.', 'hit');
+    console.error('❌ THREE не определён! Библиотека не загружена.');
+    return;
+  }
+  
   currentDifficulty = difficulty;
   const config = DIFFICULTY_CONFIG[difficulty];
   state.timeLeft = config.MISSION_TIME;
@@ -479,6 +499,41 @@ function createDetailedDrone(){
 function initSimulator(){
   console.log('🗺️ Инициализация геолог-симулятора...');
   
+  // Проверка наличия THREE
+  if(typeof THREE === 'undefined'){
+    showNotification('❌ Ошибка: библиотека Three.js не загружена! Проверьте интернет-соединение.', 'hit');
+    console.error('❌ THREE не определён! Библиотека не загружена.');
+    return;
+  }
+  
+  // Очистка предыдущей сцены
+  if(scene){
+    while(scene.children.length > 0) {
+      const child = scene.children[0];
+      if(child.geometry) child.geometry.dispose();
+      if(child.material) {
+        if(Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+      scene.remove(child);
+    }
+  }
+  
+  if(renderer){
+    const canvas = renderer.domElement;
+    if(canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    renderer.dispose();
+    renderer = null;
+  }
+  
+  deposits = [];
+  obstacles = [];
+  propellers = [];
+  droneGroup = null;
+  
   state.gameCompleted = false;
   state.dronePos.set(0, 10, 0);
   state.droneVel.set(0, 0, 0);
@@ -489,6 +544,10 @@ function initSimulator(){
   state.signalLevel = 100;
   state.currentDeposit = null;
   state.scanProgress = 0;
+  
+  document.getElementById('deposits-found').innerText = '0';
+  document.getElementById('score-value').innerText = '0';
+  document.getElementById('battery-level').innerText = '100';
   
   scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x87ceeb, 0.008);
@@ -614,7 +673,8 @@ function initSimulator(){
       marker: marker, 
       mesh: deposit,
       type: depositType,
-      depth: Math.floor(Math.random() * 50) + 10
+      depth: Math.floor(Math.random() * 50) + 10,
+      scanProgress: 0
     });
   }
   
@@ -622,7 +682,10 @@ function initSimulator(){
   droneGroup.position.copy(state.dronePos);
   scene.add(droneGroup);
   
-  setupEventListeners();
+  if(!listenersAttached){
+    setupEventListeners();
+    listenersAttached = true;
+  }
   animate();
   
   console.log(`✅ Геолог-симулятор запущен. Уровень: ${config.name}`);
@@ -630,6 +693,9 @@ function initSimulator(){
 
 function updateDrone(){
   if(state.gameCompleted) return;
+  
+  // Проверка, что всё инициализировано
+  if(typeof THREE === 'undefined' || !scene || !camera) return;
   
   const cameraForward = new THREE.Vector3();
   camera.getWorldDirection(cameraForward);
@@ -679,6 +745,7 @@ function updateDrone(){
     droneGroup.rotation.z += (tiltZ - droneGroup.rotation.z) * 0.1;
   }
   
+  // Проверка столкновений с горами
   for(let i = 0; i < obstacles.length; i++){
     const obs = obstacles[i];
     const dist = state.dronePos.distanceTo(obs.pos);
@@ -690,6 +757,7 @@ function updateDrone(){
     }
   }
   
+  // Проверка падения
   if(state.dronePos.y < 2.5){
     SFX.crash();
     showNotification("💥 Дрон упал! Миссия провалена!", 'hit');
@@ -697,6 +765,7 @@ function updateDrone(){
     return;
   }
   
+  // Сканирование залежей
   let scanning = false;
   deposits.forEach(deposit => {
     if(!deposit.found){
@@ -706,22 +775,22 @@ function updateDrone(){
       );
       if(dist < deposit.radius && state.dronePos.y < 15){
         scanning = true;
-        state.scanProgress += 0.5;
+        deposit.scanProgress = (deposit.scanProgress || 0) + 0.5;
         document.getElementById('deposit-type').innerText = deposit.type;
         document.getElementById('deposit-depth').innerText = deposit.depth;
-        document.getElementById('scan-progress').innerText = Math.round(state.scanProgress);
+        document.getElementById('scan-progress').innerText = Math.round(deposit.scanProgress);
         
-        if(state.scanProgress >= 100){
+        if(deposit.scanProgress >= 100){
           deposit.found = true;
           state.depositsFound++;
           state.score += 200;
           scene.remove(deposit.marker);
+          scene.remove(deposit.mesh);
           SFX.success();
           showNotification(`✅ ${deposit.type} найдены! (${state.depositsFound}/${DIFFICULTY_CONFIG[currentDifficulty].depositCount})`, 'success');
           
           document.getElementById('deposits-found').innerText = state.depositsFound;
           document.getElementById('score-value').innerText = state.score;
-          state.scanProgress = 0;
           
           if(state.depositsFound >= DIFFICULTY_CONFIG[currentDifficulty].depositCount){
             showVictoryModal();
@@ -732,12 +801,10 @@ function updateDrone(){
   });
   
   if(!scanning){
-    state.scanProgress = Math.max(0, state.scanProgress - 1);
-    document.getElementById('scan-progress').innerText = Math.round(state.scanProgress);
-    if(state.scanProgress === 0){
-      document.getElementById('deposit-type').innerText = '-';
-      document.getElementById('deposit-depth').innerText = '-';
-    }
+    const scanElem = document.getElementById('scan-progress');
+    if(scanElem) scanElem.innerText = '0';
+    document.getElementById('deposit-type').innerText = '-';
+    document.getElementById('deposit-depth').innerText = '-';
   }
   
   document.getElementById('drone-altitude').innerText = Math.round(state.dronePos.y);
@@ -755,7 +822,11 @@ function animate(){
   if(state.gameCompleted){ state.animationId = null; return; }
   state.animationId = requestAnimationFrame(animate);
   
+  // Проверка, что всё инициализировано
+  if(typeof THREE === 'undefined' || !scene || !camera || !renderer) return;
+  
   updateDrone();
+  if(state.gameCompleted) return;
   
   state.propAngle += 0.6;
   propellers.forEach(p => { p.rotation.y = state.propAngle; });
@@ -788,23 +859,9 @@ function fullGameRestart(){
   
   console.log('🔄 Перезапуск миссии...');
   
-  if(scene){
-    while(scene.children.length > 0) {
-      const child = scene.children[0];
-      if(child.geometry) child.geometry.dispose();
-      if(child.material) {
-        if(Array.isArray(child.material)) {
-          child.material.forEach(m => m.dispose());
-        } else {
-          child.material.dispose();
-        }
-      }
-      scene.remove(child);
-    }
-    deposits = [];
-    obstacles = [];
-    propellers = [];
-  }
+  if(state.timerInterval){ clearInterval(state.timerInterval); state.timerInterval = null; }
+  document.getElementById('victoryModal').classList.remove('show');
+  document.getElementById('defeatModal').classList.remove('show');
   
   initSimulator();
   startMissionTimer();
@@ -827,20 +884,11 @@ function setupEventListeners(){
     keys = {};
   });
   
-  document.getElementById('resetBtn').addEventListener('click', () => {
-    if(state.timerInterval) clearInterval(state.timerInterval);
-    fullGameRestart();
-  });
+  document.getElementById('resetBtn').addEventListener('click', fullGameRestart);
   document.getElementById('exitMenuBtn').addEventListener('click', exitToMenu);
-  document.getElementById('fullRestartBtn').addEventListener('click', () => {
-    document.getElementById('victoryModal').classList.remove('show');
-    fullGameRestart();
-  });
+  document.getElementById('fullRestartBtn').addEventListener('click', fullGameRestart);
   document.getElementById('exitToMenuBtn').addEventListener('click', exitToMenu);
-  document.getElementById('defeatRestartBtn').addEventListener('click', () => {
-    document.getElementById('defeatModal').classList.remove('show');
-    fullGameRestart();
-  });
+  document.getElementById('defeatRestartBtn').addEventListener('click', fullGameRestart);
   document.getElementById('defeatExitBtn').addEventListener('click', exitToMenu);
 }
 
@@ -848,22 +896,10 @@ window.addEventListener('beforeunload', () => {
   if(state.animationId) cancelAnimationFrame(state.animationId);
   if(state.timerInterval) clearInterval(state.timerInterval);
   if(audioCtx && audioCtx.state !== 'closed'){ try{ audioCtx.close(); } catch(e){} }
-  if(scene){
-    while(scene.children.length > 0) {
-      const child = scene.children[0];
-      if(child.geometry) child.geometry.dispose();
-      if(child.material) {
-        if(Array.isArray(child.material)) {
-          child.material.forEach(m => m.dispose());
-        } else {
-          child.material.dispose();
-        }
-      }
-      scene.remove(child);
-    }
-  }
   if(renderer) renderer.dispose();
 });
+
+console.log('✅ Код полностью исправлен. state объявлен до всех функций.');
 </script>
 </body>
 </html>
